@@ -52,7 +52,4 @@ VALUES
   ('A', '2021-01-07'),
   ('B', '2021-01-09');
 
-INSERT INTO dannys_diner.members
-  ("customer_id","join_date")
-VALUES
-  ('C', '2021-01-11');
+
