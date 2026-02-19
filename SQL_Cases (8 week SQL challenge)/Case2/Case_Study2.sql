@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 /* Data cleaning*/
 SELECT*
 FROM pizza_runner.customer_orders;
@@ -396,20 +396,307 @@ ORDER BY order_day;
 --B. Runner and Customer Experience
 
 --How many runners signed up for each 1 week period? (i.e. week starts 2021-01-01)
+SELECT 
+    DATE_TRUNC('week', registration_date - INTERVAL '4 days') + INTERVAL '4 days' AS week_start,
+    COUNT(*) AS runner_signup
+FROM pizza_runner.runners
+GROUP BY week_start
+ORDER BY week_start;
 
 --What was the average time in minutes it took for each runner to arrive at the Pizza Runner HQ to pickup the order?
+WITH clean_runner_orders AS(
+    SELECT
+        order_id,
+        runner_id,
+        NULLIF(pickup_time, 'null')::timestamp AS pickup_time,
+        CAST(REPLACE(NULLIF(distance, 'null'),'km','') AS numeric) AS distance,
+        CAST(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        REPLACE(
+                    NULLIF(duration,'null')
+                    ,'minutes',''),
+                    'mins',''),
+                    'min',''),
+                    'ute','') 
+                    AS integer) AS duration,
+        CASE WHEN cancellation IN ('null','') THEN NULL
+            ELSE cancellation
+        END AS cancellation
+    FROM pizza_runner.runner_orders
+    )
+, clean_customer_orders AS(
+    SELECT
+        order_id,
+        customer_id,
+        pizza_id,
+        CASE WHEN TRIM(exclusions) IN ('','null') THEN NULL
+            ELSE TRIM(exclusions)
+        END AS exclusions,
+        CASE WHEN TRIM(extras) IN ('','null') THEN NULL
+            ELSE TRIM(extras)
+        END AS extras,
+        order_time
+    FROM pizza_runner.customer_orders
+    )
+SELECT 
+    runner_id,
+    ROUND(
+        AVG(pickup_speed)
+        ,0) AS avg_pickup
+FROM(
+SELECT 
+    runner_id,
+    ROUND(
+        EXTRACT(EPOCH FROM (pickup_time - order_time)) / 60
+        ,0) AS pickup_speed
+FROM clean_runner_orders cro
+INNER JOIN clean_customer_orders cco
+    ON cro.order_id = cco.order_id
+WHERE cro.pickup_time IS NOT NULL
+)t
+GROUP BY runner_id;
 
 --Is there any relationship between the number of pizzas and how long the order takes to prepare?
+WITH clean_runner_orders AS(
+    SELECT
+        order_id,
+        runner_id,
+        NULLIF(pickup_time, 'null')::timestamp AS pickup_time,
+        CAST(REPLACE(NULLIF(distance, 'null'),'km','') AS numeric) AS distance,
+        CAST(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        REPLACE(
+                    NULLIF(duration,'null')
+                    ,'minutes',''),
+                    'mins',''),
+                    'min',''),
+                    'ute','') 
+                    AS integer) AS duration,
+        CASE WHEN cancellation IN ('null','') THEN NULL
+            ELSE cancellation
+        END AS cancellation
+    FROM pizza_runner.runner_orders
+    )
+, clean_customer_orders AS(
+    SELECT
+        order_id,
+        customer_id,
+        pizza_id,
+        CASE WHEN TRIM(exclusions) IN ('','null') THEN NULL
+            ELSE TRIM(exclusions)
+        END AS exclusions,
+        CASE WHEN TRIM(extras) IN ('','null') THEN NULL
+            ELSE TRIM(extras)
+        END AS extras,
+        order_time
+    FROM pizza_runner.customer_orders
+    )
+, total_pizzas AS(
+    SELECT
+        cco.order_id,
+        COUNT(*) AS pizza_count
+    FROM clean_customer_orders cco
+    INNER JOIN clean_runner_orders cro
+        ON cco.order_id = cro.order_id
+    GROUP BY cco.order_id
+)
+, prep_time AS(
+    SELECT
+        cco.order_id,
+        ROUND(
+        EXTRACT(EPOCH FROM (pickup_time - order_time)) / 60
+        ,0) AS prep
+    FROM clean_runner_orders cro
+    INNER JOIN clean_customer_orders cco
+        ON cro.order_id = cco.order_id
+    WHERE pickup_time IS NOT NULL
+)
+SELECT
+    tp.pizza_count,
+    ROUND(
+        AVG(pt.prep)
+        ,0) AS AVG_prep
+FROM total_pizzas tp
+INNER JOIN prep_time pt
+    ON tp.order_id = pt.order_id
+GROUP BY tp.pizza_count
+ORDER BY tp.pizza_count;
 
 --What was the average distance travelled for each customer?
+WITH clean_runner_orders AS(
+    SELECT
+        order_id,
+        runner_id,
+        NULLIF(pickup_time, 'null')::timestamp AS pickup_time,
+        CAST(REPLACE(NULLIF(distance, 'null'),'km','') AS numeric) AS distance,
+        CAST(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        REPLACE(
+                    NULLIF(duration,'null')
+                    ,'minutes',''),
+                    'mins',''),
+                    'min',''),
+                    'ute','') 
+                    AS integer) AS duration,
+        CASE WHEN cancellation IN ('null','') THEN NULL
+            ELSE cancellation
+        END AS cancellation
+    FROM pizza_runner.runner_orders
+    )
+, clean_customer_orders AS(
+    SELECT
+        order_id,
+        customer_id,
+        pizza_id,
+        CASE WHEN TRIM(exclusions) IN ('','null') THEN NULL
+            ELSE TRIM(exclusions)
+        END AS exclusions,
+        CASE WHEN TRIM(extras) IN ('','null') THEN NULL
+            ELSE TRIM(extras)
+        END AS extras,
+        order_time
+    FROM pizza_runner.customer_orders
+    )
+SELECT
+    customer_id,
+    ROUND(
+        AVG(distance)
+        ,0) AS avg_distance
+FROM clean_runner_orders cro
+JOIN clean_customer_orders cco
+    ON cro.order_id = cco.order_id
+WHERE pickup_time IS NOT NULL
+GROUP BY customer_id;
 
 --What was the difference between the longest and shortest delivery times for all orders?
+WITH clean_runner_orders AS(
+    SELECT
+        order_id,
+        runner_id,
+        NULLIF(pickup_time, 'null')::timestamp AS pickup_time,
+        CAST(REPLACE(NULLIF(distance, 'null'),'km','') AS numeric) AS distance,
+        CAST(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        REPLACE(
+                    NULLIF(duration,'null')
+                    ,'minutes',''),
+                    'mins',''),
+                    'min',''),
+                    'ute','') 
+                    AS integer) AS duration,
+        CASE WHEN cancellation IN ('null','') THEN NULL
+            ELSE cancellation
+        END AS cancellation
+    FROM pizza_runner.runner_orders
+    )
+    SELECT
+        MAX(duration) - MIN(duration) AS delivery_difference
+    FROM clean_runner_orders
+    WHERE duration IS NOT NULL AND pickup_time IS NOT NULL;
 
 --What was the average speed for each runner for each delivery and do you notice any trend for these values?
+/*From the data given, runner 1 is more consistent in their delivery speed with having some of the lowest distance 
+needed to be traveled for each order while having the highest speeds.
+*/
+WITH clean_runner_orders AS(
+    SELECT
+        order_id,
+        runner_id,
+        NULLIF(pickup_time, 'null')::timestamp AS pickup_time,
+        CAST(REPLACE(NULLIF(distance, 'null'),'km','') AS numeric) AS distance,
+        CAST(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        REPLACE(
+                    NULLIF(duration,'null')
+                    ,'minutes',''),
+                    'mins',''),
+                    'min',''),
+                    'ute','') 
+                    AS integer) AS duration,
+        CASE WHEN cancellation IN ('null','') THEN NULL
+            ELSE cancellation
+        END AS cancellation
+    FROM pizza_runner.runner_orders
+    )
+, clean_customer_orders AS(
+    SELECT
+        order_id,
+        customer_id,
+        pizza_id,
+        CASE WHEN TRIM(exclusions) IN ('','null') THEN NULL
+            ELSE TRIM(exclusions)
+        END AS exclusions,
+        CASE WHEN TRIM(extras) IN ('','null') THEN NULL
+            ELSE TRIM(extras)
+        END AS extras,
+        order_time
+    FROM pizza_runner.customer_orders
+    )
+SELECT
+    cro.runner_id,
+    cco.order_id,
+    ROUND(AVG((distance / duration) * 60),2) AS speed
+FROM clean_runner_orders cro
+INNER JOIN clean_customer_orders cco
+    ON cro.order_id = cco.order_id
+WHERE duration IS NOT NULL
+GROUP BY
+    runner_id,
+    cco.order_id
+ORDER BY 
+    runner_id,
+    cco.order_id;
 
 --What is the successful delivery percentage for each runner?
-
-
+WITH clean_runner_orders AS(
+    SELECT
+        order_id,
+        runner_id,
+        NULLIF(pickup_time, 'null')::timestamp AS pickup_time,
+        CAST(REPLACE(NULLIF(distance, 'null'),'km','') AS numeric) AS distance,
+        CAST(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        REPLACE(
+                    NULLIF(duration,'null')
+                    ,'minutes',''),
+                    'mins',''),
+                    'min',''),
+                    'ute','') 
+                    AS integer) AS duration,
+        CASE WHEN cancellation IN ('null','') THEN NULL
+            ELSE cancellation
+        END AS cancellation
+    FROM pizza_runner.runner_orders
+    )
+SELECT
+    runner_id,
+    SUM(delivery_status) AS successful_deliveries,
+    COUNT(*) AS total_deliveries,
+    ROUND(
+        SUM(delivery_status)::numeric / COUNT(*) * 100,2 
+    ) AS success_rate
+FROM(
+    SELECT
+    runner_id,
+        CASE WHEN pickup_time IS NOT NULL AND cancellation IS NULL THEN 1 
+            ELSE 0
+        END AS delivery_status
+    FROM clean_runner_orders
+)t
+GROUP BY runner_id
+ORDER BY runner_id;
 
 --C. Ingredient Optimisation
 
