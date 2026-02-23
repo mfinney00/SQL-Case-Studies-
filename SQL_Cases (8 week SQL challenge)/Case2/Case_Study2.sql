@@ -702,20 +702,196 @@ ORDER BY runner_id;
 
 --What are the standard ingredients for each pizza?
 
+SELECT
+    pn.pizza_name,
+    pt.topping_name
+FROM pizza_runner.pizza_names pn
+JOIN  pizza_runner.pizza_recipes pr
+    ON pr.pizza_id = pn.pizza_id
+JOIN unnest(string_to_array(pr.toppings, ',')) AS t(topping_id)
+    ON TRUE
+JOIN pizza_runner.pizza_toppings pt
+    ON t.topping_id ::int = pt.topping_id
+ORDER BY pn.pizza_name, pt.topping_name;
+
+
 --What was the most commonly added extra?
+WITH clean_customer_orders AS(
+    SELECT
+        order_id,
+        customer_id,
+        pizza_id,
+        CASE WHEN TRIM(exclusions) IN ('','null') THEN NULL
+            ELSE TRIM(exclusions)
+        END AS exclusions,
+        CASE WHEN TRIM(extras) IN ('','null') THEN NULL
+            ELSE TRIM(extras)
+        END AS extras,
+        order_time
+    FROM pizza_runner.customer_orders
+    )
+, extras AS ( 
+    SELECT
+        order_id,
+        unnest(string_to_array(extras, ','))::int AS extra_id
+    FROM clean_customer_orders 
+    WHERE extras IS NOT NULL
+)
+SELECT
+    topping_name,
+    COUNT(*) AS extra_count,
+    ROW_NUMBER() OVER(ORDER BY COUNT(*) DESC) AS rank
+FROM extras e
+JOIN pizza_runner.pizza_toppings pt
+    ON e.extra_id = pt.topping_id
+GROUP BY topping_name
+ORDER BY extra_count DESC
+LIMIT 1;
+
 
 --What was the most common exclusion?
 
-/*Generate an order item for each record in the customers_orders table in the format of one of the following:
-Meat Lovers
-Meat Lovers - Exclude Beef
-Meat Lovers - Extra Bacon
-Meat Lovers - Exclude Cheese, Bacon - Extra Mushroom, Peppers
-Generate an alphabetically ordered comma separated ingredient list for each pizza order from the customer_orders table and add a 2x in front of any relevant ingredients
-For example: "Meat Lovers: 2xBacon, Beef, ... , Salami" */
+WITH clean_customer_orders AS(
+    SELECT
+        order_id,
+        customer_id,
+        pizza_id,
+        CASE WHEN TRIM(exclusions) IN ('','null') THEN NULL
+            ELSE TRIM(exclusions)
+        END AS exclusions,
+        CASE WHEN TRIM(extras) IN ('','null') THEN NULL
+            ELSE TRIM(extras)
+        END AS extras,
+        order_time
+    FROM pizza_runner.customer_orders
+    )
+, exclusions AS ( 
+    SELECT
+        order_id,
+        unnest(string_to_array(exclusions, ','))::int AS exclusion_id
+    FROM clean_customer_orders 
+    WHERE exclusions IS NOT NULL
+)
+SELECT
+    topping_name,
+    COUNT(*) AS exclusion_count,
+    ROW_NUMBER() OVER(ORDER BY COUNT(*) DESC) AS rank
+FROM exclusions
+JOIN pizza_runner.pizza_toppings pt
+    ON exclusions.exclusion_id = pt.topping_id
+GROUP BY topping_name
+ORDER BY exclusion_count DESC
+LIMIT 1;
+
+/*Generate an order item for each record in the customers_orders table in the format of one of the following:*/
+--Meat Lovers
+--Meat Lovers - Exclude Beef
+--Meat Lovers - Extra Bacon
+--Meat Lovers - Exclude Cheese, Bacon - Extra Mushroom, Peppers
+--Generate an alphabetically ordered comma separated ingredient list for each pizza order from the customer_orders table and add a 2x in front of any relevant ingredients
+    -- For example: "Meat Lovers: 2xBacon, Beef, ... , Salami" 
 
 --What is the total quantity of each ingredient used in all delivered pizzas sorted by most frequent first?
 
+WITH clean_customer_orders AS (
+    SELECT
+        order_id,
+        customer_id,
+        pizza_id,
+        CASE WHEN TRIM(exclusions) IN ('','null') THEN NULL ELSE TRIM(exclusions) END AS exclusions,
+        CASE WHEN TRIM(extras) IN ('','null') THEN NULL ELSE TRIM(extras) END AS extras,
+        order_time
+    FROM pizza_runner.customer_orders
+)
+,base_orders AS (
+    SELECT
+        cco.order_id,
+        pn.pizza_name,
+        cco.exclusions,
+        cco.extras,
+        pr.toppings
+    FROM clean_customer_orders cco
+    JOIN pizza_runner.pizza_names pn 
+        ON cco.pizza_id = pn.pizza_id
+    JOIN pizza_runner.pizza_recipes pr 
+        ON cco.pizza_id = pr.pizza_id
+)
+,standard_toppings AS (
+    SELECT
+        bo.order_id,
+        pt.topping_name
+    FROM base_orders bo
+    JOIN unnest(string_to_array(bo.toppings, ',')) AS t(id)
+        ON TRUE
+    JOIN pizza_runner.pizza_toppings pt 
+        ON pt.topping_id = t.id::int
+)
+,exclusions AS (
+    SELECT
+        bo.order_id,
+        pt.topping_name
+    FROM base_orders bo
+    JOIN unnest(string_to_array(bo.exclusions, ',')) AS e(id)
+        ON bo.exclusions IS NOT NULL
+    JOIN pizza_runner.pizza_toppings pt 
+        ON pt.topping_id = e.id::int
+)
+,extras AS (
+    SELECT
+        bo.order_id,
+        pt.topping_name
+    FROM base_orders bo
+    JOIN LATERAL unnest(string_to_array(bo.extras, ',')) AS x(id)
+        ON bo.extras IS NOT NULL
+    JOIN pizza_runner.pizza_toppings pt 
+        ON pt.topping_id = x.id::int
+)
+,all_ingredients AS (
+    SELECT order_id, topping_name, 1 AS qty
+    FROM standard_toppings
+    UNION ALL
+    SELECT order_id, topping_name, 1 AS qty
+    FROM extras
+)
+
+SELECT
+    bo.order_id,
+    bo.pizza_name ||
+    CASE WHEN COUNT(ex.topping_name) > 0
+         THEN ' - Exclude ' || STRING_AGG(ex.topping_name, ', ')
+         ELSE ''
+    END ||
+    CASE WHEN COUNT(xt.topping_name) > 0
+         THEN ' - Extra ' || STRING_AGG(xt.topping_name, ', ')
+         ELSE ''
+    END AS order_description,
+    bo.pizza_name || ': ' ||
+    STRING_AGG(
+        CASE WHEN ic.qty = 2 
+             THEN '2x' || ic.topping_name 
+             ELSE ic.topping_name 
+        END,
+        ', ' ORDER BY ic.topping_name
+    ) AS ingredient_list
+
+FROM base_orders bo
+LEFT JOIN exclusions ex 
+    ON bo.order_id = ex.order_id
+LEFT JOIN extras xt 
+    ON bo.order_id = xt.order_id
+
+JOIN (
+    SELECT
+        order_id,
+        topping_name,
+        SUM(qty) AS qty
+    FROM all_ingredients
+    GROUP BY order_id, topping_name
+) ic
+    ON bo.order_id = ic.order_id
+
+GROUP BY bo.order_id, bo.pizza_name
+ORDER BY bo.order_id;
 
 
 --D. Pricing and Ratings
@@ -751,7 +927,7 @@ Total number of pizzas*/
 /*If Danny wants to expand his range of pizzas - 
 how would this impact the existing data design? 
 Write an INSERT statement to demonstrate what would happen if a new Supreme pizza with all the toppings was added to the Pizza Runner menu?*/
-=======
+
 
 
 
